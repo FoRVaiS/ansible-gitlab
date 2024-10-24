@@ -1,0 +1,50 @@
+---
+- name: Register file stats
+  block:
+    - stat:
+        path: "{{ item.path }}"
+      register: file_stat_regs
+      with_items:
+        - { key: "gitlab_apt_sources", path: "/etc/apt/sources.list.d/gitlab_gitlab-ce.list" }
+        - { key: "gitlab_gpg", path: "/usr/share/keyrings/gitlab_gitlab-ce-archive-keyring.gpg" }
+
+    - set_fact:
+        "{{ item }}": "{{ file_stat_regs | community.general.json_query('results[?item.key==`' + item + '`]') | first }}"
+      with_items: "{{ file_stat_regs | community.general.json_query('results[*].item.key') | list }}"
+
+- name: Gather package facts
+  package_facts:
+    manager: auto
+
+- name: Ensure required directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: 0755
+  with_items:
+    - "{{ gitlab_dir }}"
+
+- name: Copy gitlab.rb to the remote server
+  copy:
+    src: "{{ gitlab_config_path }}"
+    dest: "{{ gitlab_dir }}/gitlab.rb"
+    owner: root
+    group: root
+    mode: 0644
+
+- name: Add GitLab CE to apt repositories
+  when: not gitlab_apt_sources.stat.exists or not gitlab_gpg.stat.exists
+  shell: |
+    curl -s https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.deb.sh | bash
+
+- name: Install GitLab CE through apt
+  when: '"gitlab-ce" not in ansible_facts.packages'
+  package:
+    state: present
+    name:
+      - "gitlab-ce={{ version }}"
+
+- name: Pin `gitlab-ce` package
+  dpkg_selections:
+    name: gitlab-ce
+    selection: hold

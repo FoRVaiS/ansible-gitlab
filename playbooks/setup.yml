@@ -1,0 +1,31 @@
+---
+- hosts: gitlab
+  gather_facts: true
+  vars_files:
+    - ../vars/default.yml
+
+  roles:
+    - role: ufw
+      vars:
+        ports:
+          - https
+          - http
+          - ssh
+          - "{{ ufw_port_gitlab_shell }}"
+    - role: ssl
+    - role: gitlab
+      vars:
+        version: "{{ gitlab_version }}"
+
+  pre_tasks:
+    - name: Install required packages
+      package:
+        state: present
+        name:
+          - rsync
+          - curl
+          - openssh-server
+          - ca-certificates
+          - tzdata
+          - perl
+          - expect

@@ -1,0 +1,18 @@
+---
+gitlab_version: 17.5.0-ce.0
+gitlab_common_name: example.com
+gitlab_config_path: ../resources/gitlab/gitlab.rb
+
+ufw_port_gitlab_shell: 2222 # gitlab-shell
+
+backups: ../backups
+
+# GitLab Directories (should not need to edit these in most cases)
+gitlab_dir: /etc/gitlab
+gitlab_ssl_dir: /etc/gitlab/ssl
+gitlab_backups_dir: /var/opt/gitlab/backups
+
+# Certificates
+ca_cert_src: path/to/cert.crt
+ca_key_src: path/to/cert.key
+ca_key_content: "{{ lookup('file', ca_key_src) }}"

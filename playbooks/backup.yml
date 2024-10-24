@@ -1,0 +1,76 @@
+---
+- hosts: gitlab
+  vars_files:
+    - ../vars/default.yml
+
+  pre_tasks:
+    - name: Ensure required directories exist
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: 0755
+      with_items:
+        - /tmp/backup
+
+  tasks:
+    - block:
+        - name: Find the previous backup file
+          shell: "ls -lav --group-directories-first -I . -I .. {{ gitlab_backups_dir }} | tail -n +2 | awk '{print $9}' | sort -hr | head -n 1"
+          register: gitlab_backups_dir_stdout
+          changed_when: false
+
+        - name: Extract the previous backup file name
+          set_fact:
+            base_backup_archive: "{{ gitlab_backups_dir_stdout.stdout_lines | last }}"
+            base_backup_id: "{{ gitlab_backups_dir_stdout.stdout_lines | map('regex_replace', '_gitlab_backup.tar', '') | last }}"
+
+        - name: Create incremental backup
+          command: "gitlab-backup create INCREMENTAL=yes PREVIOUS_BACKUP={{ base_backup_id }}"
+
+        - name: Delete base backup
+          file:
+            path: "{{ gitlab_backups_dir }}/{{ base_backup_archive }}_gitlab_backup.tar"
+            state: absent
+
+      rescue:
+        - name: Create GitLab backup using the copy strategy
+          command: gitlab-backup create STRATEGY=copy
+
+    - name: Find the latest backup file
+      shell: "ls -lav --group-directories-first -I . -I .. {{ gitlab_backups_dir }} | awk '{print $9}'"
+      register: latest_gitlab_backups_dir_stdout
+      changed_when: false
+
+    - name: Extract the latest backup file name
+      set_fact:
+        current_backup_archive: "{{ latest_gitlab_backups_dir_stdout.stdout_lines | sort | last }}"
+
+    - name: Move required files into archive folder
+      copy:
+        src: "{{ item }}"
+        dest: "/tmp/backup/{{ item | split('/') | last }}"
+        remote_src: true
+      with_items:
+        - "{{ gitlab_backups_dir }}/{{ current_backup_archive }}"
+        - "{{ gitlab_dir }}/gitlab-secrets.json"
+        - "{{ gitlab_dir }}/gitlab.rb"
+
+    - name: Package backup archive
+      archive:
+        path: /tmp/backup/*
+        dest: "/tmp/{{ current_backup_archive }}"
+        format: tar
+
+    - name: Fetch the packaged backup archive
+      fetch:
+        src: "/tmp/{{ current_backup_archive }}"
+        dest: "{{ backups }}/{{ current_backup_archive }}"
+        flat: true
+
+    - name: Cleanup
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - "/tmp/{{ current_backup_archive }}"
+        - /tmp/backup

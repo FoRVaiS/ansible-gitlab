@@ -1,0 +1,5 @@
+---
+openssl_size: 2048
+
+gitlab_cert_path: "{{ gitlab_ssl_dir }}/gitlab.{{ gitlab_common_name }}.crt"
+gitlab_key_path: "{{ gitlab_ssl_dir }}/gitlab.{{ gitlab_common_name }}.key"

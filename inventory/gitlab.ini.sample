@@ -1,0 +1,5 @@
+[all]
+gitlab-1 ansible_host=192.168.0.123 ansible_user=gitlab known_hosts=[] ansible_ssh_common-args='-o StrictHostKeyChecking=no'
+
+[gitlab]
+gitlab-1

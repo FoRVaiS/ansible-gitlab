@@ -1,0 +1,72 @@
+---
+- hosts: gitlab
+  vars_files:
+    - ../vars/default.yml
+
+  pre_tasks:
+    - name: Get latest backup archive
+      delegate_to: localhost
+      shell: "ls -lavh --group-directories-first -I . -I .. {{ backups }} | tail -n +2 | awk '{print $9}' | sort -hr | head -n 1"
+      register: backups_stdout
+
+    - name: Register backup variables
+      delegate_to: localhost
+      set_fact:
+        backup_archive: "{{ backups_stdout.stdout_lines | last }}"
+        backup_id: "{{ backups_stdout.stdout_lines | map('regex_replace', '_gitlab_backup.tar', '') | last }}"
+        backup_dir: "{{ backups_stdout.stdout_lines | map('regex_replace', '.tar', '') | last }}"
+
+    - name: Ensure required directories exist
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: 0755
+      with_items:
+        - "{{ gitlab_backups_dir }}"
+        - "/tmp/{{ backup_dir }}"
+
+  tasks:
+    - debug:
+        msg: "Restoring backup: {{ backup_archive }}..."
+
+    - name: Unarchive backup package
+      unarchive:
+        src: "{{ backups }}/{{ backup_archive }}"
+        dest: "/tmp/{{ backup_dir }}"
+
+    - name: Import backup files to GitLab
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        remote_src: true
+      with_items:
+        - { src: "/tmp/{{ backup_dir }}/gitlab.rb", dest: "{{ gitlab_dir }}/gitlab.rb" }
+        - { src: "/tmp/{{ backup_dir }}/gitlab-secrets.json", dest: "{{ gitlab_dir }}/gitlab-secrets.json" }
+        - { src: "/tmp/{{ backup_dir }}/{{ backup_archive }}", dest: "{{ gitlab_backups_dir }}/{{ backup_archive }}" }
+
+    - name: Stop database consumer services
+      shell: gitlab-ctl stop {{ item }}
+      with_items:
+        - puma
+        - sidekiq
+
+    - name: Restore from latest backup archive
+      expect:
+        command: "gitlab-backup restore BACKUP={{ backup_id }}"
+        responses:
+          "Do you want to continue (yes/no)?":
+            - "yes"
+            - "yes"
+
+    - name: Run post-restore commands
+      shell: "{{ item }}"
+      with_items:
+        - gitlab-ctl restart
+        - gitlab-rake gitlab:check SANITIZE=true
+
+    - name: Cleanup
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - "/tmp/{{ backup_dir }}"

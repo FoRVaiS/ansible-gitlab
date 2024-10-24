@@ -1,0 +1,7 @@
+venv/
+
+backups/
+resources/
+
+inventory/gitlab.ini
+vars/default.yml

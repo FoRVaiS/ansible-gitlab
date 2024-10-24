@@ -1,0 +1,29 @@
+---
+- hosts: gitlab
+  gather_facts: true
+  vars_files:
+    - ../vars/default.yml
+
+  pre_tasks:
+    - name: Ensure required directories exist
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: 0755
+      with_items:
+        - /etc/gitlab
+
+  tasks:
+    - name: Copy gitlab.rb to the remote server
+      copy:
+        src: "{{ gitlab_config_path }}"
+        dest: "{{ gitlab_dir }}/gitlab.rb"
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Reconfigure GitLab
+      shell: "gitlab-ctl {{ item }}"
+      with_items:
+        - reconfigure
+        - restart

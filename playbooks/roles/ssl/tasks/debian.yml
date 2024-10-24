@@ -1,0 +1,89 @@
+---
+- name: Ensure required directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: 0755
+  with_items:
+    - "{{ gitlab_ssl_dir }}"
+
+- name: Register certificate variables
+  block:
+    - stat:
+        path: "{{ item.path }}"
+      register: ssl_file_regs
+      with_items:
+        - { key: "ca_crt", path: "/usr/local/share/ca-certificates/ownca.crt" }
+        - { key: "cert_crt", path: "{{ gitlab_cert_path }}" }
+        - { key: "cert_key", path: "{{ gitlab_key_path }}" }
+
+    - set_fact:
+        "{{ item }}": "{{ ssl_file_regs | community.general.json_query('results[?item.key==`' + item + '`]') | first }}"
+      with_items: "{{ ssl_file_regs | community.general.json_query('results[*].item.key') | list }}"
+
+- name: Adding custom CA certificate to store
+  when: not ca_crt.stat.exists
+  block:
+    - name: Copy CA certificate to system trusted certificates directory
+      copy:
+        src: "{{ ca_cert_src }}"
+        dest: /usr/local/share/ca-certificates/ownca.crt
+        mode: 0644
+        owner: root
+        group: root
+
+    - name: Update the system's trusted certificates
+      command: update-ca-certificates
+
+- name: Generate self-signed wildcard certificate
+  when: not cert_crt.stat.exists or not cert_key.stat.exists
+  block:
+    - name: Generate an OpenSSL private key with the default values (2048 bits, RSA)
+      community.crypto.openssl_privatekey:
+        path: /tmp/openssl.key
+        size: 2048
+      register: openssl_key
+
+    - name: Generate an OpenSSL Certificate Signing Request
+      community.crypto.openssl_csr:
+        path: /tmp/openssl.csr
+        privatekey_path: "{{ openssl_key.filename }}"
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+        key_usage_critical: true
+        basic_constraints:
+          - CA:FALSE
+        basic_constraints_critical: true
+        common_name: "{{ gitlab_common_name }}"
+        subject_alt_name: "DNS:*.{{ gitlab_common_name }}"
+        subject_alt_name_critical: true
+      register: openssl_csr
+
+    - name: Generate an OpenSSL certificate
+      community.crypto.x509_certificate:
+        path: /tmp/openssl.crt
+        privatekey_path: "{{ openssl_key.filename }}"
+        csr_path: "{{ openssl_csr.filename }}"
+        ownca_path: /usr/local/share/ca-certificates/ownca.crt
+        ownca_privatekey_content: "{{ ca_key_content }}"
+        provider: ownca
+      register: openssl_crt
+
+    - name: Import SSL item to GitLab
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        remote_src: true
+      with_items:
+        - { src: "{{ openssl_crt.filename }}", dest: "{{ gitlab_cert_path }}" }
+        - { src: "{{ openssl_key.filename }}", dest: "{{ gitlab_key_path }}" }
+
+    - name: Cleanup
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - "{{ openssl_csr.filename }}"
+        - "{{ openssl_crt.filename }}"
+        - "{{ openssl_key.filename }}"
